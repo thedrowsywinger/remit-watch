@@ -8,6 +8,8 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { FxModule } from './fx/fx.module';
 import { AlertsModule } from './alerts/alerts.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { AdminModule } from './admin/admin.module';
+import { MetricsModule } from './metrics/metrics.module';
 
 @Module({
   imports: [
@@ -33,7 +35,9 @@ import { NotificationsModule } from './notifications/notifications.module';
     AuthModule,
     FxModule,
     AlertsModule,
-    NotificationsModule
+    NotificationsModule,
+    AdminModule,
+    MetricsModule
   ],
 })
 export class AppModule {}

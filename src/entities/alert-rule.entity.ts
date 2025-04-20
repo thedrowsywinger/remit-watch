@@ -35,6 +35,9 @@ export class AlertRule {
   @Column('simple-json')
   channels: string[];  // e.g. ['telegram','email']
 
+  @Column({ type: 'varchar', length: 2048, nullable: true })
+  webhookUrl?: string;
+
   @Column({ name: 'last_triggered', type: 'datetime', nullable: true })
   lastTriggered: Date | null;
 

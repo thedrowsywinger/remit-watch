@@ -6,6 +6,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { CreateAlertDto } from './dto/create-alert.dto';
 
 import { TelegramNotifier } from '../notifications/telegram-notifier.service';
+import { WebhookNotifier } from '../notifications/webhook-notifier.service';
+import { MetricsService } from '../metrics/metrics.service';
 
 @Injectable()
 export class AlertsService {
@@ -13,6 +15,8 @@ export class AlertsService {
     @InjectRepository(AlertRule)
     private alertsRepo: Repository<AlertRule>,
     private telegram: TelegramNotifier,
+    private webhook: WebhookNotifier,
+    private metrics: MetricsService
   ) {}
 
   async create(userId: number, dto: CreateAlertDto) {
@@ -22,6 +26,7 @@ export class AlertsService {
       thresholdType: dto.thresholdType,
       thresholdValue: dto.thresholdValue,
       channels: dto.channels,
+      webhookUrl: dto.webhookUrl, 
       lastTriggered: null,
     });
     return this.alertsRepo.save(rule);
@@ -45,6 +50,7 @@ export class AlertsService {
   async evaluate(rate: { pair: string; rate: number }) {
     const rules = await this.alertsRepo.find({ where: { pair: rate.pair } });
     for (const rule of rules) {
+      this.metrics.alertsEvaluated.inc();
       let triggered = false;
       if (rule.thresholdType === 'gt' && rate.rate > +rule.thresholdValue) {
         triggered = true;
@@ -52,6 +58,7 @@ export class AlertsService {
         triggered = true;
       }
       if (triggered) {
+        this.metrics.alertsTriggered.inc();
         // TODO: send notifications via channels in rule.channels[]
         // e.g. this.notifyTelegram(...), this.notifyEmail(...)
         const msg = [
@@ -62,10 +69,25 @@ export class AlertsService {
           `*Current Rate*: ${rate.rate}`,
           `*Timestamp*: ${new Date().toLocaleString()}`,
         ].join('\n');
+
+        // Build a payload/message
+        const payload = {
+          alertId: rule.id,
+          pair: rate.pair,
+          thresholdType: rule.thresholdType,
+          thresholdValue: +rule.thresholdValue,
+          currentRate: rate.rate,
+          timestamp: new Date().toISOString(),
+        };
         
                   
         if (rule.channels.includes('telegram')) {
           await this.telegram.sendMessage(msg);
+        }
+
+        // Webhook
+        if (rule.channels.includes('webhook') && rule.webhookUrl) {
+          await this.webhook.send(rule.webhookUrl, payload);
         }
   
         // TODO: handle other channels (email, webhook) here...

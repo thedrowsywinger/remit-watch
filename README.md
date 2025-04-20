@@ -1,103 +1,90 @@
 # remit-watch
-An FX Alert Bot
+A low‑cost, reliable FX Alert Bot for BDT‑USD (and other FX pairs) with threshold‑based push notifications via Telegram and webhooks, plus health checks and Prometheus‑style metrics.
 
-# Product Requirements Document (PRD)
+---
 
-## 1. Executive Summary  
-Building a reliable, low‑cost FX Alert Bot for BDT–USD (and eventually other pairs) that lets users define threshold rules and receive real‑time push alerts via Telegram, WhatsApp, email, or custom webhooks.
+## Table of Contents
+1. [Executive Summary](#executive-summary)
+2. [Core Features](#core-features)
+3. [User Stories](#user-stories)
+4. [Functional Requirements](#functional-requirements)
+5. [Non-Functional Requirements](#non-functional-requirements)
+6. [Data Model (MySQL)](#data-model-mysql)
+7. [API Endpoints](#api-endpoints)
+8. [Health & Monitoring](#health--monitoring)
+9. [Development Roadmap & Timeline](#development-roadmap--timeline)
+10. [Success Metrics](#success-metrics)
 
-## 2. Core Features
+---
 
-| Feature           | Details                                                                                   |
-|-------------------|-------------------------------------------------------------------------------------------|
-| **Data Collection** | – Scrape Bangladesh Bank twice daily (cron).<br>– Poll partner‑bank JSON/CSV feeds hourly where available. |
-| **Rules Engine**    | – Users define thresholds (e.g. “alert if BDT > 112/USD” or “±1 % in 24 h”).<br>– Store rules in DB; evaluate on each new data point.|
-| **Notification Channels** | – Telegram Bot API<br>– WhatsApp via Twilio API<br>– Email (SendGrid)<br>– Custom webhook POST|
-| **User Management** | – Sign‑up / login (JWT + refresh tokens)<br>– Profile: contact methods, timezone|
-| **Historical Data & Charts** | – Persist rate history in DB.<br>– Expose chart endpoints (e.g. `/charts/30d?pair=BDTUSD`).|
-| **Admin Dashboard** | – View system health, recent scrapes, notification logs, user counts.|
-| **Monetization**    | – Stripe integration for subscription.<br>– Feature gates in API.|
+## Executive Summary
+Building a reliable, low‑cost FX Alert Bot for BDT‑USD (and eventually other pairs) that lets users define threshold rules and receive real‑time push alerts via Telegram and custom webhooks.
 
-## 3. User Stories
+---
 
-1. **As a user**, I want to sign up and verify my email so I can manage alerts securely.  
-2. **As a user**, I want to create an alert rule “BDT > 112” so I get notified when the rate crosses my desired level.  
-3. **As a user**, I want to receive that alert in Telegram so I don’t have to check a website constantly.  
-4. **As an admin**, I want to see last‑24h scrape failures so I can act if a source breaks.
+## Core Features
 
-## 4. Functional Requirements
+| Feature                   | Details                                                                                              |
+|---------------------------|------------------------------------------------------------------------------------------------------|
+| **Data Collection**       | – Fetch USD→BDT from open.er‑api.com twice daily via Cron.                                            |
+| **Rules Engine**          | – Users define thresholds (e.g. “alert if BDT > 112”).<br>– Persist rules and evaluate on each fetch. |
+| **Notifications**         | – **Telegram** via Bot API<br>– **Webhooks**: POST JSON payload to user‑provided URL                   |
+| **User Management**       | – Sign‑up / login (JWT)<br>– Profile: plan (free/pro)                                                 |
+| **Admin Health Checks**   | – `/admin/health` endpoint via NestJS Terminus                                                      |
+| **Prometheus Metrics**    | – `/metrics` endpoint exposes Prometheus counters via prom‑client                                     |
 
-### 4.1 Authentication & Authorization  
+---
+
+## User Stories
+1. **As a user**, I want to register and log in so my alerts are private.  
+2. **As a user**, I want to create an alert rule (e.g. “BDTUSD > 112”) with a callback webhook URL so I get pushed data.  
+3. **As a user**, I want to receive alerts in my Telegram chat.  
+4. **As an admin**, I want to check system health and metrics to verify uptime and performance.  
+
+---
+
+## Functional Requirements
+
+### 1. Authentication & Authorization
 - **Endpoints**:  
-  - `POST /auth/register` → create user, send verification email.  
-  - `POST /auth/login` → return JWT + refresh token.  
-  - `POST /auth/refresh` → rotate tokens.  
-- **Guards**: JWT guard on all `/api/*`.
+  - `POST /auth/register` → create user.  
+  - `POST /auth/login` → return JWT.  
+- **Guards**: JWT on all protected routes.
 
-### 4.2 FX Data Ingestion  
-- **Service**: `FxIngestService` (NestJS provider).  
-  - `scheduleScrape()` (using `@nestjs/schedule` Cron):  
-    - Scrape BB official page (HTML parsing with Cheerio).  
-    - Fetch partner JSON/CSV (Axios + CSV parser).  
-    - Normalize into `{ pair: 'BDTUSD', rate: number, timestamp: Date }`.  
-    - Persist in `fx_rates` table.  
+### 2. FX Data Ingestion
+- **Service**: `FxService` with `@Cron('0 6,18 * * *')`  
+- **Source**: `https://open.er-api.com/v6/latest/USD` for BDT rate  
+- **Persistence**: store in `fx_rates` table with `{ pair, rate, timestamp, source }`.
 
-### 4.3 Rules Evaluation  
-- **Entity**: `AlertRule { id, userId, pair, thresholdType (gt/lt/changePct), thresholdValue, channels[] }`.  
-- **Service**: `AlertService` invoked after each new rate insert:  
-  - Fetch all rules for `pair`.  
-  - If condition met (e.g. `rate > thresholdValue` or `pctChange24h > value`), enqueue notifications and mark rule as triggered (for non‑recurring or reset per 24 h).
+### 3. Rules & Alerts
+- **Entity**: `AlertRule { id, userId, pair, thresholdType (gt|lt), thresholdValue, channels[], webhookUrl?, lastTriggered }`.  
+- **Evaluation**: on each fetch, evaluate all rules for the pair and trigger notifications.
 
-### 4.4 Notifications  
-- **Providers** (strategy pattern):  
-  - `TelegramNotifier` (node‑telegram‑bot‑api),  
-  - `WhatsAppNotifier` (Twilio),  
-  - `EmailNotifier` (SendGrid),  
-  - `WebhookNotifier`.  
-- **Queue**: RabbitMQ (you’ve used before) to decouple ingress from notification spikes.
+### 4. Notifications
+- **TelegramNotifier**: send Markdown message via HTTP API.  
+- **WebhookNotifier**: POST JSON payload `{ alertId, pair, thresholdType, thresholdValue, currentRate, timestamp }` to user’s URL.
 
-### 4.5 Billing & Subscriptions  
-- **Stripe** integration for recurring billing.  
-- Feature guards in code: free tier limits number of rules and pairs.
+---
 
-## 5. Non‑Functional Requirements  
-- **Scalability**: Deploy on AWS ECS Fargate (or Lambda + RDS for serverless).  
-- **Reliability**:  
-  - Retry scraping on failure (exponential backoff).  
-  - Track failures in `scrape_logs` with alerts to admin email if > X fails.  
-- **Security**:  
-  - Store secrets in AWS Secrets Manager.  
-  - Rate‑limit public endpoints.  
-- **Monitoring**:  
-  - Use AWS CloudWatch / Prometheus + Grafana dashboards.  
+## Non-Functional Requirements
+- **Scalability**: lightweight NestJS services, can run in a small VM or Docker.  
+- **Reliability**: retry fetch on failure; log failures.  
+- **Security**: store secrets in env; JWT guards.  
+- **Monitoring**: free, open‑source tools (NestJS Terminus + prom-client).
 
-## 6. Data Model (MySQL)
+---
 
+## Data Model (MySQL)
 ```sql
--- FX Rates History
 CREATE TABLE fx_rates (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
-  pair VARCHAR(7) NOT NULL,        -- e.g. 'BDTUSD'
+  pair VARCHAR(7) NOT NULL,
   rate DECIMAL(10,4) NOT NULL,
-  timestamp DATETIME NOT NULL,
+  timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
   source VARCHAR(50) NOT NULL,
   INDEX idx_pair_time (pair, timestamp)
 );
 
--- User Alert Rules
-CREATE TABLE alert_rules (
-  id INT AUTO_INCREMENT PRIMARY KEY,
-  user_id INT NOT NULL,
-  pair VARCHAR(7) NOT NULL,
-  type ENUM('gt','lt','changePct') NOT NULL,
-  value DECIMAL(10,4) NOT NULL,
-  channels JSON NOT NULL,
-  last_triggered DATETIME NULL,
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-);
-
--- Users (simplified)
 CREATE TABLE users (
   id INT AUTO_INCREMENT PRIMARY KEY,
   email VARCHAR(255) UNIQUE NOT NULL,
@@ -105,57 +92,61 @@ CREATE TABLE users (
   is_pro BOOLEAN DEFAULT FALSE,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE alert_rules (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  user_id INT NOT NULL,
+  pair VARCHAR(7) NOT NULL,
+  thresholdType ENUM('gt','lt') NOT NULL,
+  thresholdValue DECIMAL(10,4) NOT NULL,
+  channels JSON NOT NULL,
+  webhookUrl VARCHAR(2048) NULL,
+  last_triggered DATETIME NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
 ```
-
-## 7. API Endpoints
-
-| Method | Path                     | Auth  | Description                                  |
-|--------|--------------------------|-------|----------------------------------------------|
-| POST   | `/auth/register`         | no    | Create account & send verification email     |
-| POST   | `/auth/login`            | no    | Login, receive JWT                           |
-| GET    | `/users/me`              | yes   | Get profile & plan info                      |
-| POST   | `/alerts`                | yes   | Create new alert rule                        |
-| GET    | `/alerts`                | yes   | List my alert rules                          |
-| DELETE | `/alerts/:id`            | yes   | Delete an alert rule                         |
-| GET    | `/rates/:pair/history`   | yes   | Return last N days’ rates for charting       |
-| GET    | `/admin/health`          | yes*  | (Admin only) view scrape & queue status      |
-
-\* flagged in JWT with `role=admin`
-
-## 8. Architecture Diagram (High‑Level)  
-```
-┌────────────┐     ┌─────────────┐      ┌────────────────┐
-│ Cron/Scheduler ─▶│ FxIngestSvc ──▶│    RDS (MySQL)   │
-│ (NestJS @Cron)   │    (Nest)    │      │ fx_rates, etc. │
-└────────────┘     └─────┬───────┘      └────────┬───────┘
-                            │                            │
-                            ▼                            │
-                     ┌─────────────┐                    │
-                     │ AlertSvc    │◀───────────────────┘
-                     └────┬────────┘
-                          │
-              ┌───────────┼───────────┐
-              ▼           ▼           ▼
-       TelegramBot  Twilio/WhatsApp  SendGrid  Webhook
-```
-
-## 9. Development Roadmap & Timeline
-
-| Week | Milestone                                    |
-|------|-----------------------------------------------|
-| 1    | Set up NestJS project, DB schemas, auth       |
-| 2    | Implement scraping service + persistence      |
-| 3    | Build rules engine + basic Telegram alerts    |
-| 4    | Add email & webhook channels, admin health    |
-| 5    | Stripe billing + pro/free feature gating      |
-| 6    | Historical charts endpoint + simple UI (optional) |
-| 7    | Testing, monitoring, deploy to AWS            |
-
-## 10. Success Metrics
-
-- **Alert delivery latency**: < 5 min from rate publication.  
-- **Error rate**: < 0.1 % scrape or notification failures.  
-- **Conversion**: ≥ 10 % free→paid within 90 days.  
-- **Retention**: ≥ 50 % of active users still receiving alerts after 60 days.
 
 ---
+
+## API Endpoints
+
+| Method | Path                 | Auth | Description                                  |
+|--------|----------------------|------|----------------------------------------------|
+| POST   | `/auth/register`     | No   | Register new user                            |
+| POST   | `/auth/login`        | No   | Login, receive JWT                           |
+| GET    | `/users/me`          | Yes  | Get user profile                             |
+| POST   | `/alerts`            | Yes  | Create alert rule                            |
+| GET    | `/alerts`            | Yes  | List my alert rules                          |
+| DELETE | `/alerts/:id`        | Yes  | Delete an alert rule                         |
+| GET    | `/fx/rate`           | No   | Trigger fetch (manual)                       |
+| GET    | `/admin/health`      | No   | Health check (NestJS Terminus)               |
+| GET    | `/metrics`           | No   | Prometheus metrics endpoint                  |
+
+---
+
+## Health & Monitoring
+1. **Health Check**: `GET /admin/health` returns database connectivity status.  
+2. **Metrics**: `GET /metrics` exposes Prometheus‑formatted counters for FX scrapes, scrape errors, alerts evaluated/triggered, plus default process metrics.
+
+---
+
+## Development Roadmap & Timeline
+| Week | Milestone                                    |
+|------|-----------------------------------------------|
+| 1    | NestJS scaffold, DB & auth                    |
+| 2    | FX ingestion & persistence                    |
+| 3    | Rules engine & Telegram Notifier              |
+| 4    | Webhook support & health checks               |
+| 5    | Prometheus metrics & global error counting    |
+| 6    | Frontend UI                                   |
+| 7    | Testing & Docker deployment                   |
+
+---
+
+## Success Metrics
+- **Alert latency**: < 5 min from fetch.  
+- **Uptime**: ≥ 99 %.  
+- **Metric coverage**: system health & metrics available.  
+- **User onboarding**: first 100 sign‑ups within month 1.
+

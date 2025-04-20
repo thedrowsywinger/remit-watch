@@ -7,6 +7,8 @@ import {
   IsArray,
   ArrayNotEmpty,
   Matches,
+  IsOptional,
+  IsUrl,
 } from 'class-validator';
 
 export class CreateAlertDto {
@@ -26,4 +28,8 @@ export class CreateAlertDto {
   @ArrayNotEmpty()
   @IsIn(['telegram', 'email', 'webhook'], { each: true })
   channels: string[];
+
+  @IsOptional()
+  @IsUrl({}, { message: 'webhookUrl must be a valid URL' })
+  webhookUrl?: string;
 }

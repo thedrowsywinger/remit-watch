@@ -7,6 +7,7 @@ import axios from 'axios';
 import * as cheerio from 'cheerio';
 import { FxRate } from '../entities/fx-rate.entity';
 import { AlertsService } from '../alerts/alerts.service';
+import { MetricsService } from '../metrics/metrics.service';
 // import { parse } from 'csv-parse/sync'; // if you add CSV feeds later
 
 @Injectable()
@@ -17,6 +18,7 @@ export class FxService {
     @InjectRepository(FxRate)
     private fxRepo: Repository<FxRate>,
     private alerts: AlertsService,  
+    private metrics: MetricsService
   ) { }
 
   /**
@@ -27,6 +29,7 @@ export class FxService {
   // @Cron(CronExpression.EVERY_12_HOURS)
   async fetchLatest() {
     this.logger.log('Fetching rate from open.er-api.com…');
+    this.metrics.fxScrapes.inc();
     try {
       const resp = await axios.get('https://open.er-api.com/v6/latest/USD');
       if (resp.data.result !== 'success') {
@@ -50,6 +53,7 @@ export class FxService {
       await this.alerts.evaluate({ pair: saved.pair, rate: +saved.rate });
       return { rate: fx.rate, timestamp: fx.timestamp };
     } catch (err) {
+      this.metrics.fxErrors.inc();
       this.logger.error('Open‑ER‑API fetch failed', err);
     }
   }
