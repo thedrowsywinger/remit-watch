@@ -6,41 +6,67 @@ import {
   CreateDateColumn,
   ManyToOne,
   JoinColumn,
+  Index,
 } from 'typeorm';
 import { User } from './user.entity';
+import { BaseEntity } from './base.entity';
 
-export type ThresholdType = 'gt' | 'lt';  // greater‑than or less‑than
+export enum ThresholdType {
+  GREATER_THAN = 'gt',
+  LESS_THAN = 'lt'
+}
+
+export enum AlertRuleStatus {
+  ACTIVE = 'active',
+  INACTIVE = 'inactive'
+}
 
 @Entity('alert_rules')
-export class AlertRule {
+export class AlertRule extends BaseEntity {
   @PrimaryGeneratedColumn()
   id: number;
 
-  @ManyToOne(() => User, (u) => u.id, { onDelete: 'CASCADE' })
+  @Column({ name: 'user_id' })
+  @Index('idx_user_status')
+  userId: number;
+
+  @ManyToOne(() => User)
   @JoinColumn({ name: 'user_id' })
   user: User;
 
-  @Column({ name: 'user_id' })
-  userId: number;
-
   @Column({ length: 7 })
+  @Index('idx_pair_status')
   pair: string;  // e.g. 'BDTUSD'
 
-  @Column({ type: 'enum', enum: ['gt', 'lt'] })
+  @Column({
+    type: 'enum',
+    enum: ThresholdType,
+    name: 'threshold_type'
+  })
   thresholdType: ThresholdType;
 
-  @Column('decimal', { precision: 10, scale: 4 })
+  @Column({ type: 'decimal', precision: 10, scale: 4, name: 'threshold_value' })
   thresholdValue: number;
 
-  @Column('simple-json')
+  @Column({ type: 'json' })
   channels: string[];  // e.g. ['telegram','email']
 
-  @Column({ type: 'varchar', length: 2048, nullable: true })
+  @Column({ name: 'webhook_url', length: 2048, nullable: true })
   webhookUrl?: string;
 
   @Column({ name: 'last_triggered', type: 'datetime', nullable: true })
-  lastTriggered: Date | null;
+  @Index('idx_last_triggered')
+  lastTriggered?: Date;
 
-  @CreateDateColumn({ name: 'created_at' })
-  createdAt: Date;
+  @Column({
+    type: 'enum',
+    enum: AlertRuleStatus,
+    default: AlertRuleStatus.ACTIVE
+  })
+  @Index('idx_user_status')
+  @Index('idx_pair_status')
+  status: AlertRuleStatus;
+
+  @Column({ name: 'deleted_at', type: 'datetime', nullable: true })
+  deletedAt?: Date;
 }

@@ -6,9 +6,10 @@ import { AlertsService } from './alerts.service';
 import { AlertsController } from './alerts.controller';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { MetricsModule } from '../metrics/metrics.module';
+import { User } from '../entities/user.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([AlertRule]), NotificationsModule, MetricsModule],
+  imports: [TypeOrmModule.forFeature([AlertRule, User]), NotificationsModule, MetricsModule],
   providers: [AlertsService],
   controllers: [AlertsController],
   exports: [AlertsService],

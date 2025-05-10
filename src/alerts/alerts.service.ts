@@ -4,40 +4,45 @@ import { Repository } from 'typeorm';
 import { AlertRule } from '../entities/alert-rule.entity';
 import { InjectRepository } from '@nestjs/typeorm';
 import { CreateAlertDto } from './dto/create-alert.dto';
-
 import { TelegramNotifier } from '../notifications/telegram-notifier.service';
 import { WebhookNotifier } from '../notifications/webhook-notifier.service';
 import { MetricsService } from '../metrics/metrics.service';
+import { User } from '../entities/user.entity';
 
 @Injectable()
 export class AlertsService {
   constructor(
     @InjectRepository(AlertRule)
     private alertsRepo: Repository<AlertRule>,
+    @InjectRepository(User)
+    private userRepo: Repository<User>,
     private telegram: TelegramNotifier,
     private webhook: WebhookNotifier,
     private metrics: MetricsService
   ) {}
 
   async create(userId: number, dto: CreateAlertDto) {
-    const rule = this.alertsRepo.create({
-      userId,
-      pair: dto.pair,
-      thresholdType: dto.thresholdType,
-      thresholdValue: dto.thresholdValue,
-      channels: dto.channels,
-      webhookUrl: dto.webhookUrl, 
-      lastTriggered: null,
-    });
+    const user = await this.userRepo.findOneBy({ id: userId });
+    if (!user) {
+      throw new NotFoundException(`User with ID ${userId} not found`);
+    }
+    const rule = new AlertRule();
+    rule.pair = dto.pair;
+    rule.thresholdType = dto.thresholdType as import('../entities/alert-rule.entity').ThresholdType;
+    rule.thresholdValue = dto.thresholdValue;
+    rule.channels = dto.channels;
+    rule.webhookUrl = dto.webhookUrl;
+    rule.lastTriggered = undefined;
+    rule.user = user;
     return this.alertsRepo.save(rule);
   }
 
   findAll(userId: number) {
-    return this.alertsRepo.find({ where: { userId } });
+    return this.alertsRepo.find({ where: { user: { id: userId } } });
   }
 
   async remove(userId: number, id: number) {
-    const result = await this.alertsRepo.delete({ id, userId });
+    const result = await this.alertsRepo.delete({ id, user: { id: userId } });
     if (result.affected === 0) {
       throw new NotFoundException(`Alert rule ${id} not found`);
     }

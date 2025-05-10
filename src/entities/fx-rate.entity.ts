@@ -1,21 +1,35 @@
 // src/fx/entities/fx-rate.entity.ts
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, Index } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, Index } from 'typeorm';
+import { BaseEntity } from './base.entity';
 
 @Entity('fx_rates')
-@Index(['pair', 'timestamp'])
-export class FxRate {
-  @PrimaryGeneratedColumn('increment')
+export class FxRate extends BaseEntity {
+  @PrimaryGeneratedColumn()
   id: number;
 
   @Column({ length: 7 })
+  @Index('idx_pair_time')
   pair: string;               // e.g. 'BDTUSD'
 
-  @Column('decimal', { precision: 10, scale: 4 })
+  @Column({ type: 'decimal', precision: 10, scale: 4 })
   rate: number;
 
-  @Column({ length: 50 })
-  source: string;             // 'BB' or bank code
-
-  @CreateDateColumn()
+  @Column({ type: 'datetime', default: () => 'CURRENT_TIMESTAMP' })
+  @Index('idx_timestamp')
   timestamp: Date;            // when we scraped it
+
+  @Column({ length: 50 })
+  @Index('idx_source')
+  source: string;             // 'BB' or bank code
+}
+
+export enum CurrencyPair {
+  BDT_USD = 'BDTUSD',
+  BDT_EUR = 'BDTEUR',
+  BDT_GBP = 'BDTGBP',
+  BDT_AED = 'BDTAED',
+  BDT_SAR = 'BDTSAR',
+  BDT_SGD = 'BDTSGD',
+  BDT_MYR = 'BDTMYR',
+  BDT_INR = 'BDTINR'
 }
